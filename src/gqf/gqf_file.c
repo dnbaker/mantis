@@ -30,6 +30,35 @@
 
 #define NUM_SLOTS_TO_LOCK (1ULL<<16)
 
+#ifdef __APPLE__
+// Allow build on OSX
+// From https://api.kde.org/frameworks/kcoreaddons/html/posix__fallocate__mac_8h_source.html
+int posix_fallocate(int fd, off_t offset, off_t len)
+{
+    off_t c_test;
+    int ret;
+    if (!__builtin_saddll_overflow(offset, len, &c_test)) {
+        fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, offset + len};
+        // Try to get a continuous chunk of disk space
+        fcntl(fd, F_PREALLOCATE, &store);
+        if (ret < 0) {
+            // OK, perhaps we are too fragmented, allocate non-continuous
+            store.fst_flags = F_ALLOCATEALL;
+            ret = fcntl(fd, F_PREALLOCATE, &store);
+            if (ret < 0) {
+                return ret;
+            }
+        }
+        ret = ftruncate(fd, offset + len);
+    } else {
+        // offset+len would overflow.
+        ret = -1;
+    }
+    return ret;
+}
+#endif
+
+
 bool qf_initfile(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t
 								 value_bits, enum qf_hashmode hash, uint32_t seed, const char*
 								 filename)
